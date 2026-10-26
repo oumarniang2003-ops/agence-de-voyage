@@ -1,0 +1,268 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Agency {
+  id                  String   @id @default(uuid())
+  name                String
+  slug                String   @unique
+  email               String
+  phone               String?
+  currency            String   @default("EUR")
+  address             String?
+  logoUrl             String?
+  alertThresholdDays  Int      @default(7)
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  users               User[]
+  clients             Client[]
+  applications        Application[]
+  procedureTemplates  ProcedureTemplate[]
+  documents           Document[]
+  activityLogs        ActivityLog[]
+  notes               Note[]
+  tasks               Task[]
+  payments            Payment[]
+  appointments        Appointment[]
+}
+
+model User {
+  id           String    @id @default(uuid())
+  agencyId     String
+  agency       Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  email        String
+  passwordHash String
+  firstName    String
+  lastName     String
+  role         String    @default("COUNSELOR") // ADMIN, COUNSELOR, ASSISTANT, CLIENT
+  phone        String?
+  avatarUrl    String?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  assignedClients      Client[]      @relation("CounselorClients")
+  assignedApplications Application[] @relation("CounselorApplications")
+  verifiedDocuments    Document[]    @relation("VerifiedByUser")
+
+  @@unique([agencyId, email])
+}
+
+model Client {
+  id                    String        @id @default(uuid())
+  agencyId              String
+  agency                Agency        @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  assignedCounselorId   String?
+  assignedCounselor     User?         @relation("CounselorClients", fields: [assignedCounselorId], references: [id], onDelete: SetNull)
+  referenceCode         String
+  firstName             String
+  lastName              String
+  email                 String
+  phone                 String
+  whatsapp              String?
+  birthDate             DateTime?
+  nationality           String
+  address               String?
+  currentEducationLevel String?
+  fieldOfStudy          String?
+  targetCountry         String        @default("FRANCE") // FRANCE, CANADA, OTHER
+  targetIntake          String?
+  tags                  String?       // JSON string ou liste séparée par des virgules
+  notesSummary          String?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  applications          Application[]
+
+  @@unique([agencyId, referenceCode])
+}
+
+model ProcedureTemplate {
+  id                   String                @id @default(uuid())
+  agencyId             String?
+  agency               Agency?               @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  code                 String
+  name                 String
+  country              String                // FRANCE, CANADA, OTHER
+  description          String?
+  isDefault            Boolean               @default(false)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  steps                ProcedureStep[]
+  documentRequirements DocumentRequirement[]
+  applications         Application[]
+}
+
+model ProcedureStep {
+  id                    String            @id @default(uuid())
+  templateId            String
+  template              ProcedureTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  orderIndex            Int
+  title                 String
+  description           String?
+  estimatedDurationDays Int               @default(7)
+  isCritical            Boolean           @default(false)
+}
+
+model DocumentRequirement {
+  id          String            @id @default(uuid())
+  templateId  String
+  template    ProcedureTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  name        String
+  category    String            @default("ACADEMIQUE") // IDENTITE, ACADEMIQUE, FINANCIER, LEGAL, AUTRE
+  isMandatory Boolean           @default(true)
+  description String?
+}
+
+model Application {
+  id                 String            @id @default(uuid())
+  agencyId           String
+  agency             Agency            @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  clientId           String
+  client             Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  counselorId        String?
+  counselor          User?             @relation("CounselorApplications", fields: [counselorId], references: [id], onDelete: SetNull)
+  templateId         String?
+  template           ProcedureTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  dossierNumber      String
+  country            String            // FRANCE, CANADA
+  targetInstitution  String?
+  targetProgram      String?
+  intake             String?
+  status             String            @default("IN_PROGRESS") // DRAFT, IN_PROGRESS, BLOCKED, ACCEPTED, VISA_GRANTED, VISA_REFUSED, CLOSED
+  currentStepIndex   Int               @default(0)
+  progressPercentage Int               @default(0)
+  totalServiceFee    Float             @default(0)
+  currency           String            @default("EUR")
+  lastActivityAt     DateTime          @default(now())
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  steps              ApplicationStep[]
+  documents          Document[]
+  activityLogs       ActivityLog[]
+  notes              Note[]
+  tasks              Task[]
+  payments           Payment[]
+  appointments       Appointment[]
+
+  @@unique([agencyId, dossierNumber])
+}
+
+model ApplicationStep {
+  id                String      @id @default(uuid())
+  applicationId     String
+  application       Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  stepTitle         String
+  stepDescription   String?
+  orderIndex        Int
+  status            String      @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, SKIPPED, BLOCKED
+  startedAt         DateTime?
+  completedAt       DateTime?
+  responsibleUserId String?
+  comments          String?
+  updatedAt         DateTime    @updatedAt
+}
+
+model Document {
+  id                  String      @id @default(uuid())
+  agencyId            String
+  agency              Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  applicationId       String
+  application         Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  requirementName     String?
+  name                String
+  filePath            String?
+  fileSize            Int?
+  mimeType            String?
+  status              String      @default("MISSING") // MISSING, UPLOADED, IN_REVIEW, VALIDATED, REJECTED, EXPIRED
+  expiresAt           DateTime?
+  verificationComment String?
+  verifiedByUserId    String?
+  verifiedByUser      User?       @relation("VerifiedByUser", fields: [verifiedByUserId], references: [id], onDelete: SetNull)
+  verifiedAt          DateTime?
+  version             Int         @default(1)
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+}
+
+model ActivityLog {
+  id            String       @id @default(uuid())
+  agencyId      String
+  agency        Agency       @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  applicationId String?
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  clientId      String?
+  userId        String?
+  userName      String
+  actionType    String       // STEP_CHANGED, DOCUMENT_UPLOADED, DOCUMENT_VALIDATED, NOTE_ADDED, PAYMENT_RECEIVED, STATUS_CHANGED, CREATED
+  description   String
+  metadata      String?      // JSON string
+  createdAt     DateTime     @default(now())
+}
+
+model Note {
+  id            String      @id @default(uuid())
+  agencyId      String
+  agency        Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  authorId      String?
+  authorName    String
+  content       String
+  isPinned      Boolean     @default(false)
+  createdAt     DateTime    @default(now())
+}
+
+model Task {
+  id             String       @id @default(uuid())
+  agencyId       String
+  agency         Agency       @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  applicationId  String?
+  application    Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  assignedToId   String?
+  assignedToName String?
+  title          String
+  dueDate        DateTime?
+  isCompleted    Boolean      @default(false)
+  priority       String       @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  createdAt      DateTime     @default(now())
+}
+
+model Payment {
+  id            String      @id @default(uuid())
+  agencyId      String
+  agency        Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  amount        Float
+  currency      String      @default("EUR")
+  paymentMethod String      @default("VIREMENT") // ESPECES, VIREMENT, CARTE, MOBILE_MONEY
+  reference     String?
+  receiptNumber String
+  notes         String?
+  createdAt     DateTime    @default(now())
+}
+
+model Appointment {
+  id            String      @id @default(uuid())
+  agencyId      String
+  agency        Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  title         String
+  type          String      // ENTRETIEN_CF, RDV_VISA, BIOMETRIE, CONSEIL, AUTRE
+  dateTime      DateTime
+  location      String?
+  notes         String?
+  status        String      @default("SCHEDULED") // SCHEDULED, COMPLETED, CANCELLED
+  createdAt     DateTime    @default(now())
+}
