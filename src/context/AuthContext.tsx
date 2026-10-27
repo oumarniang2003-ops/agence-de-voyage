@@ -25,7 +25,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const pathname = usePathname();
   const router = useRouter();
-  const isLoginPage = pathname === "/login";
+  const isLoginPage = pathname === "/login" || pathname === "/register";
 
   useEffect(() => {
     if (isLoginPage) {
@@ -39,7 +39,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (res.status === 401) {
           if (!cancelled) {
             setUser(null);
-            router.replace("/login");
+            router.replace("/register");
           }
           return;
         }

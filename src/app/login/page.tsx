@@ -1,6 +1,7 @@
 "use client";
 
 import React, { Suspense, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PlaneTakeoff, Loader2, Eye, EyeOff, Lock } from "lucide-react";
 
@@ -115,8 +116,14 @@ function LoginForm() {
         </button>
       </form>
 
-      <p className="mt-6 text-center text-xs text-gray-400">
-        Accès réservé aux collaborateurs de l’agence. Mot de passe oublié ? Contactez votre administrateur.
+      <p className="mt-6 text-center text-sm text-gray-500 dark:text-gray-400">
+        Pas encore de compte ?{" "}
+        <Link href="/register" className="font-semibold text-blue-600 hover:underline">
+          Créer mon compte
+        </Link>
+      </p>
+      <p className="mt-3 text-center text-xs text-gray-400">
+        Mot de passe oublié ? Contactez votre administrateur.
       </p>
     </div>
   );
