@@ -1,26 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getSession, unauthorized, forbidden } from "@/lib/auth";
+import { applicationInAgency, clientInAgency, userInAgency } from "@/lib/guards";
 export const dynamic = 'force-dynamic';
 export async function POST(req: NextRequest) {
   try {
+    const session = await getSession();
+    if (!session) return unauthorized();
     const body = await req.json();
     const {
-      agencyId,
       applicationId,
       requirementName,
       name,
       filePath,
       fileSize,
       mimeType,
-      userId,
-      userName,
     } = body;
+    const agencyId = session.agencyId;
+    const userId = session.userId;
+    const userName = session.name;
 
-    if (!agencyId || !applicationId || !name) {
+    if (!applicationId || !name) {
       return NextResponse.json(
-        { error: "agencyId, applicationId et name sont requis." },
+        { error: "applicationId et name sont requis." },
         { status: 400 }
       );
+    }
+
+    if (!(await applicationInAgency(applicationId, agencyId))) {
+      return NextResponse.json({ error: "Dossier introuvable." }, { status: 404 });
     }
 
     // Check if a document with this requirementName already exists for this application

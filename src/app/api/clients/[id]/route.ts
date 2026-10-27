@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getSession, unauthorized, forbidden } from "@/lib/auth";
+import { applicationInAgency, clientInAgency, userInAgency } from "@/lib/guards";
 export const dynamic = 'force-dynamic';
 
 export async function GET(
@@ -7,10 +9,12 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    const session = await getSession();
+    if (!session) return unauthorized();
     const { id } = params;
 
-    const client = await prisma.client.findUnique({
-      where: { id },
+    const client = await prisma.client.findFirst({
+      where: { id, agencyId: session.agencyId },
       include: {
         assignedCounselor: {
           select: { id: true, firstName: true, lastName: true, email: true },
@@ -43,16 +47,32 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    const session = await getSession();
+    if (!session) return unauthorized();
     const { id } = params;
     const body = await req.json();
 
-    const updated = await prisma.client.update({
-      where: { id },
-      data: {
-        ...body,
-        tags: body.tags ? JSON.stringify(body.tags) : undefined,
-      },
-    });
+    if (!(await clientInAgency(id, session.agencyId))) {
+      return NextResponse.json({ error: "Client introuvable" }, { status: 404 });
+    }
+    if (body.assignedCounselorId && !(await userInAgency(body.assignedCounselorId, session.agencyId))) {
+      return NextResponse.json({ error: "Conseiller invalide." }, { status: 400 });
+    }
+
+    // Liste blanche : on ne laisse jamais le client modifier agencyId, id, etc.
+    const allowed = [
+      "assignedCounselorId", "firstName", "lastName", "email", "phone", "whatsapp",
+      "nationality", "address", "currentEducationLevel", "fieldOfStudy",
+      "targetCountry", "targetIntake", "notesSummary",
+    ];
+    const data: Record<string, unknown> = {};
+    for (const key of allowed) {
+      if (body[key] !== undefined) data[key] = body[key];
+    }
+    if (body.birthDate !== undefined) data.birthDate = body.birthDate ? new Date(body.birthDate) : null;
+    if (body.tags !== undefined) data.tags = body.tags ? JSON.stringify(body.tags) : null;
+
+    const updated = await prisma.client.update({ where: { id }, data });
 
     return NextResponse.json(updated);
   } catch (error) {

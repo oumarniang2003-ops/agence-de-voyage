@@ -1,23 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getSession, unauthorized, forbidden } from "@/lib/auth";
+import { applicationInAgency, clientInAgency, userInAgency } from "@/lib/guards";
 export const dynamic = 'force-dynamic';
 export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
+    const session = await getSession();
+    if (!session) return unauthorized();
     const { id } = params;
     const body = await req.json();
     const {
       status, // "VALIDATED", "REJECTED", "IN_REVIEW", "MISSING", "EXPIRED"
       verificationComment,
       expiresAt,
-      verifiedByUserId,
-      verifiedByName,
     } = body;
+    const verifiedByUserId = session.userId;
+    const verifiedByName = session.name;
 
-    const doc = await prisma.document.findUnique({
-      where: { id },
+    // Seuls Admin et Conseiller peuvent valider / rejeter une pièce
+    if ((status === "VALIDATED" || status === "REJECTED") && !["ADMIN", "COUNSELOR"].includes(session.role)) {
+      return forbidden("Votre rôle ne permet pas de valider les documents.");
+    }
+
+    const doc = await prisma.document.findFirst({
+      where: { id, agencyId: session.agencyId },
       include: { application: true },
     });
 
@@ -31,7 +40,7 @@ export async function PATCH(
         status: status || doc.status,
         verificationComment: verificationComment !== undefined ? verificationComment : doc.verificationComment,
         expiresAt: expiresAt ? new Date(expiresAt) : doc.expiresAt,
-        verifiedByUserId: verifiedByUserId || doc.verifiedByUserId,
+        verifiedByUserId: status === "VALIDATED" || status === "REJECTED" ? verifiedByUserId : doc.verifiedByUserId,
         verifiedAt: status === "VALIDATED" || status === "REJECTED" ? new Date() : doc.verifiedAt,
       },
     });

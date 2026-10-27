@@ -1,12 +1,14 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { CurrentUserSession, Role } from "@/lib/types";
 
 interface AuthContextType {
   user: CurrentUserSession | null;
   loading: boolean;
-  switchUser: (user: CurrentUserSession) => void;
+  logout: () => Promise<void>;
+  /** Équipe de l'agence de l'utilisateur connecté (conseillers, assistants…) */
   availableUsers: CurrentUserSession[];
   canEditSettings: boolean;
   canManageUsers: boolean;
@@ -21,39 +23,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<CurrentUserSession | null>(null);
   const [availableUsers, setAvailableUsers] = useState<CurrentUserSession[]>([]);
   const [loading, setLoading] = useState(true);
+  const pathname = usePathname();
+  const router = useRouter();
+  const isLoginPage = pathname === "/login";
 
-  // Fetch available demo users from API
   useEffect(() => {
-    async function loadUsers() {
+    if (isLoginPage) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    async function load() {
       try {
-        const res = await fetch("/api/auth/demo-users");
-        if (res.ok) {
-          const data = await res.json();
-          setAvailableUsers(data);
-          
-          // Check localStorage for saved session or fallback to default
-          const savedUserId = localStorage.getItem("visatrack_active_user");
-          const found = data.find((u: CurrentUserSession) => u.id === savedUserId);
-          if (found) {
-            setUser(found);
-          } else if (data.length > 0) {
-            setUser(data[0]);
-            localStorage.setItem("visatrack_active_user", data[0].id);
+        const res = await fetch("/api/auth/me");
+        if (res.status === 401) {
+          if (!cancelled) {
+            setUser(null);
+            router.replace("/login");
           }
+          return;
+        }
+        if (res.ok) {
+          const me = await res.json();
+          if (!cancelled) setUser(me);
+          const teamRes = await fetch("/api/team");
+          if (teamRes.ok && !cancelled) setAvailableUsers(await teamRes.json());
         }
       } catch (err) {
-        console.error("Failed to load demo users", err);
+        console.error("Failed to load session", err);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
-    loadUsers();
-  }, []);
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoginPage, router]);
 
-  const switchUser = (newUser: CurrentUserSession) => {
-    setUser(newUser);
-    localStorage.setItem("visatrack_active_user", newUser.id);
-  };
+  const logout = useCallback(async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    setUser(null);
+    setAvailableUsers([]);
+    router.replace("/login");
+    router.refresh();
+  }, [router]);
 
   const role: Role = user?.role || "COUNSELOR";
   const canEditSettings = role === "ADMIN";
@@ -67,7 +81,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         loading,
-        switchUser,
+        logout,
         availableUsers,
         canEditSettings,
         canManageUsers,

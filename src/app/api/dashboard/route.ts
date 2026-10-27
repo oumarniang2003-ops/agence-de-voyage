@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getSession, unauthorized, forbidden } from "@/lib/auth";
+import { applicationInAgency, clientInAgency, userInAgency } from "@/lib/guards";
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const agencyId = searchParams.get("agencyId");
-
-    if (!agencyId) {
-      return NextResponse.json({ error: "agencyId is required" }, { status: 400 });
-    }
+    const session = await getSession();
+    if (!session) return unauthorized();
+    const agencyId = session.agencyId;
 
     const agency = await prisma.agency.findUnique({
       where: { id: agencyId },

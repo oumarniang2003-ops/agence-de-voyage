@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getSession, unauthorized, forbidden } from "@/lib/auth";
+import { applicationInAgency, clientInAgency, userInAgency } from "@/lib/guards";
 export const dynamic = 'force-dynamic';
 
 export async function GET(
@@ -7,10 +9,12 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    const session = await getSession();
+    if (!session) return unauthorized();
     const { id } = params;
 
-    const application = await prisma.application.findUnique({
-      where: { id },
+    const application = await prisma.application.findFirst({
+      where: { id, agencyId: session.agencyId },
       include: {
         client: true,
         counselor: {
@@ -59,6 +63,8 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    const session = await getSession();
+    if (!session) return unauthorized();
     const { id } = params;
     const body = await req.json();
     const {
@@ -67,12 +73,12 @@ export async function PATCH(
       stepComments,
       applicationStatus,
       counselorId,
-      userId,
-      userName,
     } = body;
+    const userId = session.userId;
+    const userName = session.name;
 
-    const app = await prisma.application.findUnique({
-      where: { id },
+    const app = await prisma.application.findFirst({
+      where: { id, agencyId: session.agencyId },
       include: { steps: { orderBy: { orderIndex: "asc" } } },
     });
 
@@ -158,6 +164,9 @@ export async function PATCH(
 
     // 3. If updating counselor
     if (counselorId && counselorId !== app.counselorId) {
+      if (!(await userInAgency(counselorId, session.agencyId))) {
+        return NextResponse.json({ error: "Conseiller invalide." }, { status: 400 });
+      }
       await prisma.application.update({
         where: { id },
         data: { counselorId, lastActivityAt: new Date() },

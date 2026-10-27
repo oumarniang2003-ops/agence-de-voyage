@@ -1,14 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getSession, unauthorized, forbidden } from "@/lib/auth";
+import { applicationInAgency, clientInAgency, userInAgency } from "@/lib/guards";
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await getSession();
+    if (!session) return unauthorized();
     const body = await req.json();
-    const { agencyId, applicationId, authorId, authorName, content, isPinned } = body;
+    const { applicationId, content, isPinned } = body;
+    const agencyId = session.agencyId;
+    const authorId = session.userId;
+    const authorName = session.name;
 
-    if (!agencyId || !applicationId || !content) {
-      return NextResponse.json({ error: "agencyId, applicationId et content sont requis." }, { status: 400 });
+    if (!applicationId || !content) {
+      return NextResponse.json({ error: "applicationId et content sont requis." }, { status: 400 });
+    }
+    if (!(await applicationInAgency(applicationId, agencyId))) {
+      return NextResponse.json({ error: "Dossier introuvable." }, { status: 404 });
     }
 
     const note = await prisma.note.create({

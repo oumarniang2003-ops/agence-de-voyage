@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getSession, unauthorized, forbidden } from "@/lib/auth";
+import { applicationInAgency, clientInAgency, userInAgency } from "@/lib/guards";
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
+    const session = await getSession();
+    if (!session) return unauthorized();
     const { searchParams } = new URL(req.url);
-    const agencyId = searchParams.get("agencyId");
+    const agencyId = session.agencyId;
     const country = searchParams.get("country");
     const status = searchParams.get("status");
     const counselorId = searchParams.get("counselorId");
@@ -84,9 +88,10 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await getSession();
+    if (!session) return unauthorized();
     const body = await req.json();
     const {
-      agencyId,
       clientId,
       counselorId,
       country, // "FRANCE" ou "CANADA"
@@ -95,15 +100,23 @@ export async function POST(req: NextRequest) {
       intake,
       totalServiceFee,
       currency,
-      createdById,
-      createdByName,
     } = body;
+    const agencyId = session.agencyId;
+    const createdById = session.userId;
+    const createdByName = session.name;
 
-    if (!agencyId || !clientId || !country) {
+    if (!clientId || !country) {
       return NextResponse.json(
         { error: "Veuillez spécifier l'agence, le client et le pays de destination." },
         { status: 400 }
       );
+    }
+
+    if (!(await clientInAgency(clientId, agencyId))) {
+      return NextResponse.json({ error: "Client introuvable." }, { status: 404 });
+    }
+    if (counselorId && !(await userInAgency(counselorId, agencyId))) {
+      return NextResponse.json({ error: "Conseiller invalide." }, { status: 400 });
     }
 
     // Find the default template for this country
