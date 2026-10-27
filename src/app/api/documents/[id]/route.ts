@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-
+export const dynamic = 'force-dynamic';
 export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
@@ -47,10 +47,10 @@ export async function PATCH(
       status === "VALIDATED"
         ? "validé"
         : status === "REJECTED"
-        ? "rejeté (à corriger)"
-        : status === "IN_REVIEW"
-        ? "marqué en cours d'examen"
-        : status;
+          ? "rejeté (à corriger)"
+          : status === "IN_REVIEW"
+            ? "marqué en cours d'examen"
+            : status;
 
     await prisma.activityLog.create({
       data: {
