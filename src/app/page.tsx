@@ -66,7 +66,7 @@ export default function DashboardPage() {
               <span>Devise : {user?.agencyCurrency || "FCFA"}</span>
             </div>
             <h1 className="text-xl md:text-2xl font-bold tracking-tight">
-              Bonjour, {user?.firstName} 👋
+              Tableau de bord 👋
             </h1>
             <p className="text-blue-100 text-xs md:text-sm mt-1 max-w-xl">
               Suivi quotidien des dossiers d&apos;études et visas touristiques de votre agence.
