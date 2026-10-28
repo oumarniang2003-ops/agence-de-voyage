@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { CurrentUserSession } from "@/lib/types";
 import {
   Building2,
   UserCheck,
@@ -20,6 +21,59 @@ interface HeaderProps {
   onOpenNewApplicationModal?: () => void;
 }
 
+/**
+ * Détermine le nom d'affichage à présenter dans l'interface :
+ * - Jamais d'identifiant technique ou de préfixe d'email.
+ * - Le nom complet (Prénom + Nom) s'il est renseigné.
+ * - Par défaut : "Mon compte".
+ */
+function getUserDisplayName(user: CurrentUserSession | null): string {
+  if (!user) return "Mon compte";
+
+  const firstName = (user.firstName || "").trim();
+  const lastName = (user.lastName || "").trim();
+
+  // Si l'utilisateur a un prénom et un nom distincts
+  if (firstName && lastName) {
+    return `${firstName} ${lastName}`;
+  }
+
+  const single = firstName || lastName;
+  if (!single) return "Mon compte";
+
+  // Détection d'un nom technique / dérivé d'email (ex: "Oumarniang2003", email, ou contient des chiffres)
+  const emailPrefix = (user.email || "").split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+  const normalized = single.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  if (
+    normalized === emailPrefix ||
+    /\d{2,}/.test(single) ||
+    single.toLowerCase() === "utilisateur"
+  ) {
+    return "Mon compte";
+  }
+
+  return single;
+}
+
+/**
+ * Génère les initiales ou une icône élégante pour l'avatar.
+ * Évite rigoureusement tout affichage de "undefined".
+ */
+function renderUserAvatar(user: CurrentUserSession | null): React.ReactNode {
+  if (!user) return <User className="h-3.5 w-3.5" />;
+
+  const f = (user.firstName || "").trim();
+  const l = (user.lastName || "").trim();
+
+  if (f && l && f.length > 0 && l.length > 0) {
+    return `${f.charAt(0).toUpperCase()}${l.charAt(0).toUpperCase()}`;
+  }
+
+  // Si pas de nom de famille distinct, afficher une icône utilisateur sobre
+  return <User className="h-3.5 w-3.5" />;
+}
+
 export default function Header({
   onOpenNewClientModal,
   onOpenNewApplicationModal,
@@ -27,10 +81,23 @@ export default function Header({
   const { user, logout } = useAuth();
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
+
+  // Fermeture au clic extérieur
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setUserDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const toggleDarkMode = () => {
-    setIsDarkMode(!isDarkMode);
-    if (!isDarkMode) {
+    const nextMode = !isDarkMode;
+    setIsDarkMode(nextMode);
+    if (nextMode) {
       document.documentElement.classList.add("dark");
     } else {
       document.documentElement.classList.remove("dark");
@@ -42,25 +109,25 @@ export default function Header({
       case "ADMIN":
         return {
           label: "Directeur / Admin",
-          color: "bg-purple-100 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 border-purple-200 dark:border-purple-800",
+          color: "bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 border-purple-200 dark:border-purple-800",
           icon: Shield,
         };
       case "COUNSELOR":
         return {
           label: "Conseiller Visa",
-          color: "bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border-blue-200 dark:border-blue-800",
+          color: "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border-blue-200 dark:border-blue-800",
           icon: Briefcase,
         };
       case "ASSISTANT":
         return {
-          label: "Assistant / Saisie",
-          color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800",
+          label: "Assistant Agence",
+          color: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800",
           icon: UserCheck,
         };
       default:
         return {
-          label: role,
-          color: "bg-gray-100 text-gray-700",
+          label: "Agent",
+          color: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700",
           icon: User,
         };
     }
@@ -68,106 +135,118 @@ export default function Header({
 
   const roleInfo = getRoleBadge(user?.role || "COUNSELOR");
   const RoleIcon = roleInfo.icon;
+  const displayName = getUserDisplayName(user);
+
+  // Devise sécurisée : ne jamais afficher "undefined" ou null
+  const currency =
+    user?.agencyCurrency &&
+    user.agencyCurrency !== "undefined" &&
+    user.agencyCurrency.trim() !== ""
+      ? user.agencyCurrency
+      : "FCFA";
+
+  // Nom de l'agence sécurisé
+  const agencyName = user?.agencyName || "VisaTrack";
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-gray-200 bg-white/80 px-4 md:px-6 backdrop-blur-md dark:border-gray-800 dark:bg-gray-900/80 transition-colors">
-      {/* Left side: Agency info */}
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/20">
-          <Building2 className="h-5 w-5" />
+    <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-slate-200 bg-white/95 px-4 md:px-6 backdrop-blur-md dark:border-slate-800 dark:bg-slate-900/95 transition-colors">
+      {/* Côté gauche : Informations de l'Agence */}
+      <div className="flex items-center gap-3 min-w-0 flex-1 mr-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white shadow-sm shadow-blue-500/20">
+          <Building2 className="h-4 w-4" />
         </div>
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="font-semibold text-gray-900 dark:text-white text-sm md:text-base leading-tight">
-              {user?.agencyName || "Chargement..."}
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <h2 className="font-bold text-slate-900 dark:text-white text-xs sm:text-sm leading-tight truncate max-w-[150px] sm:max-w-xs md:max-w-md">
+              {agencyName}
             </h2>
-            <span className="rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:bg-blue-950 dark:text-blue-400">
-              {user?.agencyCurrency || "EUR"}
+            <span className="rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-blue-600 dark:bg-blue-950 dark:text-blue-400 shrink-0">
+              {currency}
             </span>
           </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
+          <p className="text-[11px] text-slate-400 truncate hidden sm:block">
             Espace Agence Sécurisé & Isolé
           </p>
         </div>
       </div>
 
-      {/* Right side: Actions, Theme, Role switcher */}
-      <div className="flex items-center gap-2 md:gap-3">
-        {onOpenNewClientModal && (
-          <button
-            onClick={onOpenNewClientModal}
-            className="hidden sm:inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 transition"
-          >
-            <PlusCircle className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-            Nouveau Client
-          </button>
-        )}
-
+      {/* Côté droit : Alignement uniforme et soigné des actions */}
+      <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+        {/* Bouton Nouveau Dossier */}
         {onOpenNewApplicationModal && (
           <button
             onClick={onOpenNewApplicationModal}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-blue-700 shadow-blue-500/20 transition"
+            className="h-9 px-3 sm:px-3.5 inline-flex items-center gap-1.5 rounded-xl bg-blue-600 text-xs font-bold text-white shadow-sm hover:bg-blue-700 shadow-blue-500/20 transition shrink-0"
           >
-            <PlusCircle className="h-3.5 w-3.5" />
-            Nouveau Dossier
+            <PlusCircle className="h-4 w-4" />
+            <span className="hidden xs:inline sm:inline">Nouveau Dossier</span>
           </button>
         )}
 
-        {/* Dark Mode toggle */}
+        {/* Bouton Bascule Mode Clair / Sombre */}
         <button
           onClick={toggleDarkMode}
-          title="Basculer le mode clair/sombre"
-          className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 transition"
+          title={isDarkMode ? "Passer en mode clair" : "Passer en mode sombre"}
+          className="h-9 w-9 flex items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 transition shrink-0"
         >
-          {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          {isDarkMode ? <Sun className="h-4 w-4 text-amber-500" /> : <Moon className="h-4 w-4 text-slate-600" />}
         </button>
 
-        {/* User / Tenant quick switcher */}
-        <div className="relative">
+        {/* Menu du compte / Profil */}
+        <div className="relative shrink-0" ref={dropdownRef}>
           <button
             onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-            className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50/80 p-1.5 pr-2.5 hover:bg-gray-100 dark:border-gray-800 dark:bg-gray-800/80 dark:hover:bg-gray-800 transition"
+            className="h-9 flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800/80 transition"
           >
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600/10 text-blue-600 font-semibold text-xs dark:bg-blue-500/20 dark:text-blue-400">
-              {user ? `${user.firstName[0]}${user.lastName[0]}` : "U"}
+            {/* Avatar circulaire ou carré arrondi avec initiales ou icône (JAMAIS "undefined") */}
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 font-bold text-[11px] dark:bg-blue-950 dark:text-blue-400">
+              {renderUserAvatar(user)}
             </div>
-            <div className="hidden text-left md:block">
-              <p className="text-xs font-medium text-gray-900 dark:text-gray-100 leading-tight">
-                {user ? `${user.firstName} ${user.lastName}` : "Utilisateur"}
+
+            {/* Nom d'affichage propre ("Mon compte" ou vrai nom) */}
+            <div className="hidden sm:block text-left">
+              <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 leading-tight truncate max-w-[130px]">
+                {displayName}
               </p>
-              <div className="flex items-center gap-1">
-                <span
-                  className={`inline-flex items-center gap-1 rounded px-1.5 py-0.2 text-[9px] font-medium border ${roleInfo.color}`}
-                >
-                  <RoleIcon className="h-2.5 w-2.5" />
-                  {roleInfo.label}
-                </span>
-              </div>
             </div>
-            <ChevronDown className="h-3.5 w-3.5 text-gray-400" />
+
+            <ChevronDown className="h-3.5 w-3.5 text-slate-400 shrink-0" />
           </button>
 
-          {/* Menu utilisateur */}
+          {/* Menu déroulant du compte */}
           {userDropdownOpen && (
-            <div className="absolute right-0 mt-2 w-64 rounded-2xl border border-gray-200 bg-white p-2 shadow-2xl dark:border-gray-800 dark:bg-gray-900 z-50">
-              <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-800">
-                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                  {user ? `${user.firstName} ${user.lastName}` : ""}
-                </p>
-                <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">{user?.email}</p>
-                <p className="text-[11px] text-gray-400 mt-0.5 flex items-center gap-1">
-                  <Building2 className="h-3 w-3" />
-                  {user?.agencyName}
+            <div className="absolute right-0 top-full mt-2 w-64 rounded-2xl border border-slate-200 bg-white p-2.5 shadow-xl dark:border-slate-800 dark:bg-slate-900 z-50 animate-in fade-in slide-in-from-top-1 duration-150">
+              <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                    {displayName}
+                  </p>
+                  <span
+                    className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-semibold border ${roleInfo.color} shrink-0`}
+                  >
+                    <RoleIcon className="h-2.5 w-2.5" />
+                    {roleInfo.label}
+                  </span>
+                </div>
+                {user?.email && (
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                    {user.email}
+                  </p>
+                )}
+                <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1 truncate">
+                  <Building2 className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{agencyName}</span>
                 </p>
               </div>
+
               <button
                 onClick={() => {
                   setUserDropdownOpen(false);
                   logout();
                 }}
-                className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30 transition"
+                className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30 transition"
               >
-                <LogOut className="h-4 w-4" />
+                <LogOut className="h-3.5 w-3.5" />
                 Se déconnecter
               </button>
             </div>
