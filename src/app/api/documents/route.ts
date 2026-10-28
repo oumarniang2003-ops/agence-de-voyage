@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSession, unauthorized, forbidden } from "@/lib/auth";
-import { applicationInAgency, clientInAgency, userInAgency } from "@/lib/guards";
-export const dynamic = 'force-dynamic';
+import { getSession, unauthorized } from "@/lib/auth";
+import { applicationInAgency } from "@/lib/guards";
+
+export const dynamic = "force-dynamic";
+
 export async function POST(req: NextRequest) {
   try {
     const session = await getSession();
@@ -12,10 +14,12 @@ export async function POST(req: NextRequest) {
       applicationId,
       requirementName,
       name,
-      filePath,
+      originalFilename,
+      fileData, // base64 string
       fileSize,
       mimeType,
     } = body;
+
     const agencyId = session.agencyId;
     const userId = session.userId;
     const userName = session.name;
@@ -31,7 +35,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Dossier introuvable." }, { status: 404 });
     }
 
-    // Check if a document with this requirementName already exists for this application
+    // Vérifier si un document avec ce requirementName existe déjà
     let document;
     if (requirementName) {
       const existing = await prisma.document.findFirst({
@@ -42,10 +46,12 @@ export async function POST(req: NextRequest) {
         document = await prisma.document.update({
           where: { id: existing.id },
           data: {
-            name,
-            filePath: filePath || existing.filePath,
-            fileSize: fileSize || existing.fileSize,
-            mimeType: mimeType || existing.mimeType,
+            name: name || existing.name,
+            originalFilename: originalFilename || existing.originalFilename || name,
+            fileData: fileData || existing.fileData,
+            filePath: `/api/documents/${existing.id}/download`,
+            fileSize: fileSize || existing.fileSize || 102400,
+            mimeType: mimeType || existing.mimeType || "application/pdf",
             status: "UPLOADED",
             version: existing.version + 1,
             updatedAt: new Date(),
@@ -54,6 +60,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Sinon créer un nouveau document (document standard ou personnalisé)
     if (!document) {
       document = await prisma.document.create({
         data: {
@@ -61,30 +68,38 @@ export async function POST(req: NextRequest) {
           applicationId,
           requirementName: requirementName || null,
           name,
-          filePath: filePath || `/uploads/${name}`,
-          fileSize: fileSize || 1024000,
+          originalFilename: originalFilename || name,
+          fileData: fileData || null,
+          filePath: null, // sera mis à jour avec son ID
+          fileSize: fileSize || 102400,
           mimeType: mimeType || "application/pdf",
           status: "UPLOADED",
           version: 1,
         },
       });
+
+      // Mettre à jour l'URL de téléchargement interne
+      document = await prisma.document.update({
+        where: { id: document.id },
+        data: { filePath: `/api/documents/${document.id}/download` },
+      });
     }
 
-    // Update application lastActivityAt
+    // Mettre à jour la date d'activité du dossier
     await prisma.application.update({
       where: { id: applicationId },
       data: { lastActivityAt: new Date() },
     });
 
-    // Create activity log
+    // Journal d'audit
     await prisma.activityLog.create({
       data: {
         agencyId,
         applicationId,
         userId: userId || null,
-        userName: userName || "Collaborateur",
+        userName: userName || "Agent",
         actionType: "DOCUMENT_UPLOADED",
-        description: `Téléversement de la pièce "${name}" (version ${document.version}).`,
+        description: `Ajout / Mise à jour du document "${name}" (version ${document.version}).`,
       },
     });
 

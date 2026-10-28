@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession, unauthorized, forbidden } from "@/lib/auth";
-import { applicationInAgency, clientInAgency, userInAgency } from "@/lib/guards";
-export const dynamic = 'force-dynamic';
+
+export const dynamic = "force-dynamic";
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
@@ -51,7 +52,6 @@ export async function PATCH(
       data: { lastActivityAt: new Date() },
     });
 
-    // Create activity log
     const statusLabel =
       status === "VALIDATED"
         ? "validé"
@@ -76,5 +76,69 @@ export async function PATCH(
   } catch (error) {
     console.error("Error updating document:", error);
     return NextResponse.json({ error: "Échec de vérification du document" }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const session = await getSession();
+    if (!session) return unauthorized();
+    const { id } = params;
+
+    const doc = await prisma.document.findFirst({
+      where: { id, agencyId: session.agencyId },
+    });
+
+    if (!doc) {
+      return NextResponse.json({ error: "Document introuvable ou accès refusé." }, { status: 404 });
+    }
+
+    // Seuls Admin et Conseiller peuvent supprimer un document
+    if (!["ADMIN", "COUNSELOR"].includes(session.role)) {
+      return forbidden("Votre rôle ne permet pas de supprimer des pièces.");
+    }
+
+    // Si c'est un document obligatoire issu du template, on remet le statut à MISSING et on vide le fichier
+    if (doc.requirementName) {
+      await prisma.document.update({
+        where: { id },
+        data: {
+          fileData: null,
+          filePath: null,
+          status: "MISSING",
+          fileSize: null,
+          mimeType: null,
+          version: 1,
+          verificationComment: null,
+          verifiedByUserId: null,
+          verifiedAt: null,
+        },
+      });
+    } else {
+      // Si c'est un document personnalisé libre, on le supprime
+      await prisma.document.delete({
+        where: { id },
+      });
+    }
+
+    // Log d'audit
+    await prisma.activityLog.create({
+      data: {
+        agencyId: session.agencyId,
+        applicationId: doc.applicationId,
+        userId: session.userId || null,
+        userName: session.name || "Agent",
+        actionType: "DOCUMENT_DELETED",
+        description: `Suppression du document "${doc.name}".`,
+      },
+    });
+
+    return NextResponse.json({ success: true, message: "Document supprimé avec succès." });
+  } catch (error) {
+    console.error("Error deleting document:", error);
+    return NextResponse.json({ error: "Échec de suppression du document" }, { status: 500 });
   }
 }

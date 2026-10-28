@@ -92,6 +92,7 @@ model ProcedureTemplate {
   code                 String
   name                 String
   country              String                // FRANCE, CANADA, OTHER
+  type                 String                @default("STUDIES") // "STUDIES" (Études) ou "TOURISM" (Visa visiteur/tourisme)
   description          String?
   isDefault            Boolean               @default(false)
   createdAt            DateTime              @default(now())
@@ -134,10 +135,13 @@ model Application {
   templateId         String?
   template           ProcedureTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
   dossierNumber      String
-  country            String            // FRANCE, CANADA
-  targetInstitution  String?
-  targetProgram      String?
-  intake             String?
+  type               String            @default("STUDIES") // "STUDIES" ou "TOURISM"
+  country            String            // FRANCE, CANADA, OTHER
+  targetInstitution  String?           // Ou motif du voyage si Tourisme
+  targetProgram      String?           // Ou durée du séjour si Tourisme
+  intake             String?           // Date ou période envisagée
+  nextAction         String?           // Prochaine action à effectuer
+  nextActionDate     DateTime?         // Date limite de la prochaine action
   status             String            @default("IN_PROGRESS") // DRAFT, IN_PROGRESS, BLOCKED, ACCEPTED, VISA_GRANTED, VISA_REFUSED, CLOSED
   currentStepIndex   Int               @default(0)
   progressPercentage Int               @default(0)
@@ -182,6 +186,8 @@ model Document {
   requirementName     String?
   name                String
   filePath            String?
+  fileData            String?     // Données du fichier en base64 pour stockage direct et téléchargement sécurisé
+  originalFilename    String?
   fileSize            Int?
   mimeType            String?
   status              String      @default("MISSING") // MISSING, UPLOADED, IN_REVIEW, VALIDATED, REJECTED, EXPIRED

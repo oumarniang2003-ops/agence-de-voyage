@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSession, unauthorized, forbidden } from "@/lib/auth";
-import { applicationInAgency, clientInAgency, userInAgency } from "@/lib/guards";
-export const dynamic = 'force-dynamic';
+import { getSession, unauthorized } from "@/lib/auth";
+import { userInAgency } from "@/lib/guards";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(
   req: NextRequest,
@@ -72,21 +73,77 @@ export async function PATCH(
       stepStatus,
       stepComments,
       applicationStatus,
+      statusNote,
       counselorId,
+      nextAction,
+      nextActionDate,
+      targetInstitution,
+      targetProgram,
+      intake,
+      totalServiceFee,
     } = body;
+
     const userId = session.userId;
     const userName = session.name;
 
     const app = await prisma.application.findFirst({
       where: { id, agencyId: session.agencyId },
-      include: { steps: { orderBy: { orderIndex: "asc" } } },
+      include: { steps: { orderBy: { orderIndex: "asc" } }, client: true },
     });
 
     if (!app) {
       return NextResponse.json({ error: "Dossier introuvable" }, { status: 404 });
     }
 
-    // 1. If updating a specific step
+    const updateData: any = {
+      lastActivityAt: new Date(),
+    };
+
+    // 1. Mise à jour de la prochaine action
+    if (nextAction !== undefined) {
+      updateData.nextAction = nextAction ? nextAction.trim() : null;
+    }
+    if (nextActionDate !== undefined) {
+      updateData.nextActionDate = nextActionDate ? new Date(nextActionDate) : null;
+    }
+
+    // 2. Mise à jour des informations générales
+    if (targetInstitution !== undefined) updateData.targetInstitution = targetInstitution;
+    if (targetProgram !== undefined) updateData.targetProgram = targetProgram;
+    if (intake !== undefined) updateData.intake = intake;
+    if (totalServiceFee !== undefined) updateData.totalServiceFee = parseFloat(totalServiceFee) || 0;
+
+    // 3. Changement de statut global
+    if (applicationStatus && applicationStatus !== app.status) {
+      updateData.status = applicationStatus;
+
+      await prisma.activityLog.create({
+        data: {
+          agencyId: app.agencyId,
+          applicationId: app.id,
+          clientId: app.clientId,
+          userId: userId || null,
+          userName: userName || "Agent",
+          actionType: "STATUS_CHANGED",
+          description: `Statut modifié de "${app.status}" à "${applicationStatus}".${statusNote ? ` Note : "${statusNote}"` : ""}`,
+        },
+      });
+
+      if (statusNote && statusNote.trim()) {
+        await prisma.note.create({
+          data: {
+            agencyId: app.agencyId,
+            applicationId: app.id,
+            authorId: userId || null,
+            authorName: userName || "Agent",
+            content: `[Statut : ${applicationStatus}] ${statusNote.trim()}`,
+            isPinned: false,
+          },
+        });
+      }
+    }
+
+    // 4. Mise à jour d'une étape spécifique
     if (stepId && stepStatus) {
       const targetStep = app.steps.find((s) => s.id === stepId);
       if (targetStep) {
@@ -101,84 +158,65 @@ export async function PATCH(
           },
         });
 
-        // Recalculate progress percentage
+        // Recalcul de progression
         const updatedSteps = await prisma.applicationStep.findMany({
           where: { applicationId: id },
         });
         const completedCount = updatedSteps.filter((s) => s.status === "COMPLETED").length;
         const total = updatedSteps.length;
-        const progressPercentage = total > 0 ? Math.round((completedCount / total) * 100) : 0;
+        updateData.progressPercentage = total > 0 ? Math.round((completedCount / total) * 100) : 0;
 
-        // If step completed, update application currentStepIndex to the next step
         let nextIndex = app.currentStepIndex;
         if (stepStatus === "COMPLETED" && targetStep.orderIndex === app.currentStepIndex) {
           nextIndex = Math.min(targetStep.orderIndex + 1, total - 1);
         }
+        updateData.currentStepIndex = nextIndex;
 
-        await prisma.application.update({
-          where: { id },
-          data: {
-            progressPercentage,
-            currentStepIndex: nextIndex,
-            lastActivityAt: new Date(),
-          },
-        });
-
-        // Activity log
         await prisma.activityLog.create({
           data: {
             agencyId: app.agencyId,
             applicationId: app.id,
             clientId: app.clientId,
             userId: userId || null,
-            userName: userName || "Collaborateur",
+            userName: userName || "Agent",
             actionType: "STEP_CHANGED",
-            description: `Étape "${targetStep.stepTitle}" mise à jour : Statut -> ${stepStatus}.`,
+            description: `Étape "${targetStep.stepTitle}" : statut -> ${stepStatus}.${stepComments ? ` Remarque : "${stepComments}"` : ""}`,
           },
         });
       }
     }
 
-    // 2. If updating global application status (e.g. BLOCKED, VISA_GRANTED, etc.)
-    if (applicationStatus && applicationStatus !== app.status) {
-      await prisma.application.update({
-        where: { id },
-        data: {
-          status: applicationStatus,
-          lastActivityAt: new Date(),
-        },
-      });
-
-      await prisma.activityLog.create({
-        data: {
-          agencyId: app.agencyId,
-          applicationId: app.id,
-          clientId: app.clientId,
-          userId: userId || null,
-          userName: userName || "Collaborateur",
-          actionType: "STATUS_CHANGED",
-          description: `Statut global du dossier changé de "${app.status}" à "${applicationStatus}".`,
-        },
-      });
-    }
-
-    // 3. If updating counselor
+    // 5. Mise à jour conseiller
     if (counselorId && counselorId !== app.counselorId) {
-      if (!(await userInAgency(counselorId, session.agencyId))) {
-        return NextResponse.json({ error: "Conseiller invalide." }, { status: 400 });
+      if (await userInAgency(counselorId, session.agencyId)) {
+        updateData.counselorId = counselorId;
       }
-      await prisma.application.update({
-        where: { id },
-        data: { counselorId, lastActivityAt: new Date() },
-      });
     }
+
+    await prisma.application.update({
+      where: { id },
+      data: updateData,
+    });
 
     const reloaded = await prisma.application.findUnique({
       where: { id },
       include: {
+        client: true,
+        counselor: {
+          select: { id: true, firstName: true, lastName: true, email: true, phone: true },
+        },
         steps: { orderBy: { orderIndex: "asc" } },
-        documents: true,
-        counselor: true,
+        documents: {
+          include: {
+            verifiedByUser: {
+              select: { id: true, firstName: true, lastName: true },
+            },
+          },
+          orderBy: { createdAt: "asc" },
+        },
+        notes: { orderBy: { createdAt: "desc" } },
+        tasks: { orderBy: { dueDate: "asc" } },
+        activityLogs: { orderBy: { createdAt: "desc" }, take: 30 },
       },
     });
 
@@ -186,5 +224,41 @@ export async function PATCH(
   } catch (error) {
     console.error("Error updating application:", error);
     return NextResponse.json({ error: "Échec de mise à jour du dossier" }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const session = await getSession();
+    if (!session) return unauthorized();
+    const { id } = params;
+
+    const app = await prisma.application.findFirst({
+      where: { id, agencyId: session.agencyId },
+    });
+
+    if (!app) {
+      return NextResponse.json({ error: "Dossier introuvable." }, { status: 404 });
+    }
+
+    // Seuls les ADMIN peuvent supprimer un dossier
+    if (session.role !== "ADMIN") {
+      return NextResponse.json(
+        { error: "Seul un administrateur peut supprimer définitivement un dossier." },
+        { status: 403 }
+      );
+    }
+
+    await prisma.application.delete({
+      where: { id },
+    });
+
+    return NextResponse.json({ success: true, message: "Dossier supprimé avec succès." });
+  } catch (error) {
+    console.error("Error deleting application:", error);
+    return NextResponse.json({ error: "Échec de suppression du dossier" }, { status: 500 });
   }
 }
